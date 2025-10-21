@@ -1,0 +1,11 @@
+# Count R / R Markdown as R
+*.R      linguist-language=R
+*.Rmd    linguist-language=R
+*.rmd    linguist-language=R
+
+# De-emphasize generated/non-code so they don't dominate
+*.html               linguist-documentation
+*.pdf                linguist-documentation
+*_files/**           linguist-generated
+*_cache/**           linguist-generated
+docs/**              linguist-documentation
