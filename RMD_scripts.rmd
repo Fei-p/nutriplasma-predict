@@ -1,0 +1,470 @@
+---
+title: "NutriPLasmaPredict_Proj"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Load Packages
+```{r, echo = FALSE}
+library(dplyr)
+library(MASS)
+library(psych)
+library(broom)
+```
+
+## Import Data
+```{r}
+#import data
+Plasma <- read.table("Plasma.txt", header = TRUE)
+
+# Generate indices for train and test data
+set.seed(23)
+n = nrow(Plasma)
+train_index = sample.int(n, size = 0.8*n)
+train = Plasma[train_index, ]
+valid = Plasma[-train_index, ]
+```
+
+## 1). Exploratory Data Analysis
+### Check variable types
+```{r}
+# check variable type
+cplasm <- sapply(Plasma, class); cplasm
+sumplasm <- sapply(Plasma, summary)
+
+# transform categorical var into factor type
+Plasma$SEX <- as.factor(Plasma$SEX)
+Plasma$SMOKSTAT <- as.factor(Plasma$SMOKSTAT)
+Plasma$VITUSE <- as.factor(Plasma$VITUSE)
+```
+
+### Inspect multicollinearity
+```{r, results="hide"}
+num = subset(train, select = -c(SEX, SMOKSTAT, VITUSE) ) 
+cor_num <- cor(num)
+pairs(num)
+```
+
+
+
+### Inspect Categorical Variable
+```{r}
+#check categorical var
+table(Plasma$SEX)
+table(Plasma$SMOKSTAT)
+table(Plasma$VITUSE)
+```
+
+```{r, results="hide"}
+# check pie chart of categorical variables
+plasma_cat = train[,(names(train)%in%c("SEX","SMOKSTAT", "VITUSE"))]
+par(mfrow=c(1,3))
+for (j in 1:3){
+  n <- nrow(plasma_cat[,j])
+  lbls <- names(table(plasma_cat[,j]))
+  lab <- paste(lbls)
+  pie(table(plasma_cat[,j]), labels = lab, main = paste("Pie chart of",colnames(plasma_cat[j])))
+}
+```
+
+
+
+```{r, results="hide"}
+# checking boxplot of categorical var
+par(mfrow=c(1,2), mar=c(3,2,2,.5), mgp=c(3,1,0))
+boxplot(Plasma$BETAPLASMA~Plasma$SEX,main='Betaplasma: side-by-side box plot by sex',xlab='sex',ylab='betaplasma', col = c("lightgrey","lightgreen"))
+boxplot(Plasma$RETPLASMA~Plasma$SEX,main='Retplasma: side-by-side box plot by sex',xlab='sex',ylab='Retplasma', col =c("lightgrey","lightgreen"))
+
+boxplot(Plasma$BETAPLASMA~Plasma$SMOKSTAT,main='Betaplasma: side-by-side box plot by smoking activities',
+xlab='sex',ylab='betaplasma', col = c("lightblue", "lightpink","lightyellow"))
+boxplot(Plasma$RETPLASMA~Plasma$SMOKSTAT,main='Retplasma: side-by-side box plot by smoking activities',
+xlab='sex',ylab='Retplasma', col = c("lightblue", "lightpink","lightyellow"))
+
+boxplot(Plasma$BETAPLASMA~Plasma$VITUSE,main='Betaplasma: side-by-side box plot by vitamin use',
+xlab='sex',ylab='betaplasma', col = c("lightseagreen", "plum","khaki"))
+boxplot(Plasma$RETPLASMA~Plasma$VITUSE,main='Retplasma: side-by-side box plot by vitamin use',
+xlab='sex',ylab='Retplasma', col = c("lightseagreen", "plum","khaki"))
+```
+
+
+
+```{r, results="hide"}
+# Check if there is significant differences between groups
+# Use Tukey's HSD- honest significant difference
+T1 <- TukeyHSD(aov(BETAPLASMA ~ SEX, Plasma))
+T2 <- TukeyHSD(aov(BETAPLASMA ~ SMOKSTAT, Plasma))
+T3 <- TukeyHSD(aov(BETAPLASMA ~ VITUSE, Plasma))
+
+T4 <- TukeyHSD(aov(RETPLASMA ~ SEX, Plasma))
+T5 <- TukeyHSD(aov(RETPLASMA ~ SMOKSTAT, Plasma))
+T6 <- TukeyHSD(aov(RETPLASMA ~ VITUSE, Plasma))
+
+par(mfrow=c(2,3))
+plot(T1)
+plot(T2)
+plot(T3)
+plot(T4)
+plot(T5)
+plot(T6)
+```
+
+### Check Numerical Variable
+```{r, results="hide"}
+# check numeric var
+sumplasm <- sapply(num, summary)
+describe(num,fast=TRUE)
+knitr::kable(round(describe(num,fast=TRUE),3), format = "html")
+```
+
+
+
+```{r, results="hide"}
+# check hist plot of numeric variables
+par(mfrow=c(3,4))
+for (i in 1:11){
+  hist(num[,i], main = paste("Histogram of",colnames(num[i])), xlab = paste(colnames(num[i])))
+}
+```
+
+
+## 2. Model Fitting
+### A. Betaplasma
+#### First order model
+```{r, results="hide", fig.keep = "none"}
+# Use stepwise regression to find first order model
+beta = subset(train, select = -c(RETPLASMA) ) 
+fit.0=lm(BETAPLASMA~1, data=beta) ##initial model, only intercept
+step.aic=stepAIC(fit.0, scope=list(upper=~AGE+SEX+SMOKSTAT+QUETELET+VITUSE+CALORIES+FAT+FIBER+ALCOHOL+CHOLESTEROL+BETADIET+RETDIET, lower= ~1), direction="both", k=2, trace=FALSE)
+step.aic$anova
+```
+
+Result : BETAPLASMA ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE
+
+```{r, results="hide"}
+# Diagnostic of BETA model1 
+train_pos = beta[beta$BETAPLASMA > 0, ]
+betamodel1 <- lm(BETAPLASMA ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE, data=train_pos)
+par(mfrow = c(1,3), mar=c(3,2,2,.5), mgp=c(3,1,0))
+plot(betamodel1, which=c(1,2))
+MASS::boxcox(betamodel1)
+```
+
+
+
+```{r}
+# log-transformation
+log_betamodel1 <- lm(log(BETAPLASMA) ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE, data=train_pos)
+summary(log_betamodel1)
+```
+
+```{r, results="hide"}
+# diagnosis of log
+par(mfrow = c(1,3), mar=c(3,2,2,.5), mgp=c(3,1,0))
+plot(log_betamodel1, which= c(1,2))
+MASS::boxcox(log_betamodel1)
+# hist plot
+par(mfrow = c(1,2), mar=c(3,2,2,.5), mgp=c(3,1,0))
+hist(train$BETAPLASMA, main = paste("Histogram of betaplasma", xlab = "betaplasma"))
+hist(log(train$BETAPLASMA), main = paste("Histogram of log betaplasma", xlab = "log betaplasma"))
+par(mfrow=c(1,1), mar=c(3,2,2,.5), mgp=c(3,1,0)) 
+# linearity check
+num$BETADIET <- log(num$BETADIET)
+pairs(num)
+```
+
+
+
+#### Model with interactive terms
+```{r, results="hide"}
+#Adding interaction effects
+#betamodel1 = lm(BETAPLASMA ~ FIBER + QUETELET + VITUSE + FAT + BETADIET, data = beta)
+stepbeta <- step(betamodel1, scope = FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE ~ .^2, direction = 'both')
+```
+
+Result : BETAPLASMA ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE + 
+    FIBER:VITUSE + FIBER:BETADIET + FAT:BETADIET + BETADIET:AGE + 
+    FAT:AGE
+
+```{r, results="hide"}
+# Diagnostic of BETA model2
+betamodel2 <- lm(formula = BETAPLASMA ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE + 
+          FIBER:VITUSE + FIBER:BETADIET + FAT:BETADIET + BETADIET:AGE + FAT:AGE, data = train_pos)
+
+par(mfrow = c(1,3))
+plot(betamodel2, which=c(1,2))
+MASS::boxcox(betamodel2)
+```
+
+
+
+```{r}
+# log-transformation
+log_betamodel2 <- lm(formula = log(BETAPLASMA) ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE + FIBER:VITUSE + FIBER:BETADIET + FAT:BETADIET + BETADIET:AGE + FAT:AGE, data = train_pos)
+summary(log_betamodel2)
+```
+
+```{r, results="hide"}
+# diagnosis of log
+par(mfrow = c(1,3), mar=c(3,2,2,.5), mgp=c(3,1,0))
+plot(log_betamodel2, which=c(1,2))
+MASS::boxcox(log_betamodel2)
+summary(log_betamodel2)
+```
+
+
+
+### B. Retoplasma
+#### First order model
+```{r, results="hide"}
+# Stepwise Regression for first order
+ret = subset(train, select = -c(BETAPLASMA) ) 
+fit.02=lm(RETPLASMA~1, data=ret) ##initial model, only intercept
+step.aic2=stepAIC(fit.02, scope=list(upper=~AGE+SEX+SMOKSTAT+QUETELET+VITUSE+CALORIES+FAT+FIBER+ALCOHOL+CHOLESTEROL+BETADIET+RETDIET, lower= ~1), direction="both", k=2, trace=FALSE)
+step.aic2$anova
+```
+
+Result : RETPLASMA ~ SEX + CALORIES + AGE
+
+```{r, results="hide"}
+# Diagonistic of RET model1
+retmodel1 <- lm(formula = RETPLASMA ~ SEX + CALORIES + AGE, data = ret)
+par(mfrow = c(1,3))
+plot(retmodel1, which = c(1,2))
+MASS::boxcox(retmodel1)
+```
+
+
+
+```{r}
+# log-transformation
+log_retmodel1 <- lm(formula = log(RETPLASMA) ~ SEX + CALORIES + AGE, data = ret)
+summary(log_retmodel1)
+```
+
+```{r, results="hide"}
+# diagnosis of log
+par(mfrow = c(1,3))
+plot(log_retmodel1, which=c(1,2))
+MASS::boxcox(log_retmodel1)
+summary(log_retmodel1)
+# hist plot
+par(mfrow = c(1,2), mar=c(3,2,2,.5), mgp=c(3,1,0))
+hist(train$RETPLASMA, main = paste("Histogram of retplasma", xlab = "retplasma"))
+hist(log(train$RETPLASMA), main = paste("Histogram of log retplasma", xlab = "log retplasma"))
+par(mfrow=c(1,1), mar=c(3,2,2,.5), mgp=c(3,1,0)) 
+# linearity check
+num$RETPLASMA <- log(num$RETPLASMA)
+pairs(num)
+```
+
+
+
+#### Model with interactive terms
+```{r}
+#Adding interactive terms
+#init_mod2 <- lm(RETPLASMA ~ SEX + CALORIES + AGE, data = ret)
+stepret <- step(retmodel1, scope = SEX + CALORIES + AGE ~ .^2, direction = 'both')
+```
+
+Result : RETPLASMA ~ SEX + CALORIES + AGE + SEX:AGE + SEX:CALORIES
+
+```{r, results="hide"}
+# Diagonistic of RET model2
+retmodel2 <- lm(formula = RETPLASMA ~ SEX + CALORIES + AGE + SEX:AGE + SEX:CALORIES, data = ret)
+par(mfrow = c(1,3))
+plot(retmodel1, which = c(1,2))
+MASS::boxcox(retmodel1)
+```
+
+
+
+```{r}
+# log-trans and diagonistic
+log_retmodel2 <- lm(formula = log(RETPLASMA) ~ SEX + CALORIES + AGE + SEX:AGE + SEX:CALORIES, data = ret)
+summary(log_retmodel2)
+```
+
+```{r, results="hide"}
+par(mfrow = c(1,3))
+plot(log_retmodel2, which = c(1,2))
+MASS::boxcox(log_retmodel2)
+```
+
+
+
+## 3. Model Selection: Criterion
+```{r}
+# get rsq, radj, bic, aic
+sumb1 <- glance(log_betamodel1)
+sumb2 <- glance(log_betamodel2)
+sumr1 <- glance(log_retmodel1)
+sumr2 <- glance(log_retmodel2)
+
+# get sse
+anvb1 <- anova(log_betamodel1)
+anvb2 <- anova(log_betamodel2)
+anvr1 <- anova(log_retmodel1)
+anvr2 <- anova(log_retmodel2)
+```
+
+```{r}
+# Get cp
+# Full model for models with interaction
+fullmod1 <- lm(log(BETAPLASMA)~.^2, data=train_pos)
+fullmod2 <- lm(log(RETPLASMA)~.^2, data= ret)
+anvf1 <- anova(fullmod1)
+anvf2 <- anova(fullmod2)
+MSEf1 <- anvf1$`Mean Sq`[79]
+MSEf2 <- anvf2$`Mean Sq`[79]
+```
+
+```{r}
+#Full model for first order model
+fullmod11 <- lm(log(BETAPLASMA)~., data=train_pos)
+fullmod22 <- lm(log(RETPLASMA)~., data=ret)
+anvf11 <- anova(fullmod11)
+anvf22 <- anova(fullmod22)
+MSEf11 <- anvf11$`Mean Sq`[13]
+MSEf22 <- anvf22$`Mean Sq`[13]
+```
+
+```{r}
+# Calculate cp
+cpb1 <- (anvb1$`Sum Sq`[7]/MSEf11) - (252-(2*7))
+cpb2 <- (anvb2$`Sum Sq`[12]/MSEf1) - (252-(2*12))
+cpr1 <- (anvr1$`Sum Sq`[4]/MSEf22) - (252-(2*4))
+cpr2 <- (anvr2$`Sum Sq`[6]/MSEf2) - (252-(2*6))
+```
+
+```{r}
+#Get pressp
+# 1. log_betamodel1
+eb1 = log_betamodel1$residuals
+hb1 = influence(log_betamodel1)$hat
+de_b1 = eb1/(1-hb1)
+pressb1 = sum((de_b1)^2)
+
+# 2. log_betamodel2
+eb2 = log_betamodel2$residuals
+hb2 = influence(log_betamodel2)$hat
+de_b2 = eb2/(1-hb2)
+pressb2 = sum( de_b2^2 )
+
+# 3. log_retmodel1
+er1 = log_retmodel1$residuals
+hr1 = influence(log_retmodel1)$hat
+de_r1 = er1/(1-hr1)
+pressr1 = sum( de_r1^2 )
+
+# 4. log_retmodel2
+er2 = log_retmodel2$residuals
+hr2 = influence(log_retmodel2)$hat
+de_r2 = er2/(1-hr2)
+pressr2 = sum( de_r2^2 )
+```
+
+```{r}
+mod <- c("Beta1","Beta2", "Ret1", "Ret2")
+sse <- round(c(anvb1$`Sum Sq`[7], anvb2$`Sum Sq`[12], anvr1$`Sum Sq`[4], anvr2$`Sum Sq`[6]),3)
+rsq <- round(c(sumb1$r.squared, sumb2$r.squared, sumr1$r.squared, sumr2$r.squared ),3)
+rsqa <- round(c(sumb1$adj.r.squared, sumb1$adj.r.squared, sumr1$adj.r.squared, sumr2$adj.r.squared),3)
+cp <- round(c(cpb1, cpb2, cpr1, cpr2),3)
+bic <- round(c(sumb1$BIC, sumb2$BIC, sumr1$BIC, sumr2$BIC),3)
+aic <- round(c(sumb1$AIC, sumb2$AIC, sumr1$AIC, sumr2$AIC),3)
+pressp <- round(c(pressb1, pressb2, pressr1, pressr2),3)
+res_sub <- cbind(mod, sse, rsq, rsqa, cp, bic, aic, pressp)
+colnames(res_sub)<-c("Model", "sse", "R^2", "R^2_a", "Cp","bic", "aic", "press_p")
+as_tibble(res_sub)
+```
+
+## 4. Data Validation
+```{r}
+# Data Validation (Beta)
+beta_train <- log_betamodel1
+beta_valid <- lm(formula = log(BETAPLASMA) ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE, data = valid)
+
+mod_sum <- cbind(coef(summary(beta_train))[,1], coef(summary(beta_valid))[,1],
+coef(summary(beta_train))[,2], coef(summary(beta_valid))[,2])
+colnames(mod_sum) <- c("Train Est","Valid Est","Train s.e.","Valid s.e.")
+
+mod_sum
+```
+
+```{r}
+#compare the SSE and R2a (Beta)
+sse_t <- sum(beta_train$residuals^2)
+n_t = nrow(train)
+mse_t <- sse_t/(n_t-7)
+sse_v <- sum(beta_valid$residuals^2)
+n_v = nrow(valid)
+mse_v <- sse_v/(n_v-7)
+Radj_t <- summary(beta_train)$adj.r.squared
+Radj_v <- summary(beta_valid)$adj.r.squared
+train_sum <- c(sse_t,mse_t,Radj_t)
+valid_sum <- c(sse_v,mse_v,Radj_v)
+criteria <- rbind(train_sum,valid_sum)
+colnames(criteria) <- c("SSE","MSE","R2_adj")
+criteria
+```
+
+```{r}
+#Get MSPE_v from new data (beta)
+beta_newdata <- data.frame(valid[, 1:12])
+y.hat <- predict(beta_train, beta_newdata)
+MSPE <- mean((log(valid$BETAPLASMA) - y.hat)^2)
+criteria <- cbind(MSPE,sse_t/n_t)
+colnames(criteria) <- c("MSPE","SSE/n")
+criteria
+```
+
+```{r}
+# Data Validation (Ret)
+ret_train <- log_retmodel1
+ret_valid <- lm(formula = log(RETPLASMA) ~ SEX + CALORIES + AGE, data = valid)
+
+mod_sum <- cbind(coef(summary(ret_train))[,1], coef(summary(ret_valid))[,1],
+coef(summary(ret_train))[,2], coef(summary(ret_valid))[,2])
+colnames(mod_sum) <- c("Train Est","Valid Est","Train s.e.","Valid s.e.")
+
+mod_sum
+```
+
+```{r}
+#compare the SSE and R2a (Ret)
+sse_t <- sum(ret_train$residuals^2)
+n_t = nrow(train)
+mse_t <- sse_t/(n_t-7)
+sse_v <- sum(ret_valid$residuals^2)
+n_v = nrow(valid)
+mse_v <- sse_v/(n_v-7)
+Radj_t <- summary(ret_train)$adj.r.squared
+Radj_v <- summary(ret_valid)$adj.r.squared
+train_sum <- c(sse_t,mse_t,Radj_t)
+valid_sum <- c(sse_v,mse_v,Radj_v)
+criteria <- rbind(train_sum,valid_sum)
+colnames(criteria) <- c("SSE","MSE","R2_adj")
+criteria
+```
+
+```{r}
+#Get MSPE_v from new data (ret)
+ret_newdata <- data.frame(valid[, 1:12])
+y.hat <- predict(ret_train, ret_newdata)
+MSPE <- mean((log(valid$RETPLASMA) - y.hat)^2)
+criteria <- cbind(MSPE,sse_t/n_t)
+colnames(criteria) <- c("MSPE","SSE/n")
+criteria
+```
+
+## 5. Rebuild model use whole dataset
+```{r}
+Plasma_pos = Plasma[Plasma$BETAPLASMA > 0, ]
+log_betamodel_final <- lm(log(BETAPLASMA) ~ FIBER + QUETELET + VITUSE + FAT + BETADIET + AGE, data = Plasma_pos)
+summary(log_betamodel_final)
+log_retmodel_final <- lm(formula = log(RETPLASMA) ~ SEX + CALORIES + AGE, data = Plasma)
+summary(log_retmodel_final)
+```
+
